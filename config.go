@@ -1,98 +1,95 @@
 package rtmp
 
 import (
-	"fmt"
-	"net/http"
+	"context"
+	"errors"
+	"log/slog"
+	"net"
+	"time"
 )
 
 // The defaults for the optional settings. They are constants rather than
 // literals inside Config.withDefaults, so the value a reader finds here is the
 // value the package uses.
 const (
-	// DefaultPrefix is where the routes are mounted when Config leaves Prefix
-	// empty.
-	DefaultPrefix = "/rtmp"
-	// DefaultPageSize is how many records one page answers with when Config
-	// leaves PageSize at zero.
-	DefaultPageSize = 25
-	// MaxPageSize is the ceiling PageSize is refused above. A page nobody
-	// bounded is a page that reads the whole table on the day the table is
-	// large.
-	MaxPageSize = 200
+	// DefaultAddr is where the server listens when Config leaves Addr empty:
+	// every interface, on the port RTMP clients assume.
+	DefaultAddr = ":1935"
+	// DefaultApp is the application name a publisher has to use, the "live"
+	// in rtmp://host/live/<key>.
+	DefaultApp = "live"
+	// DefaultIdleTimeout is how long a publisher may send nothing before it is
+	// dropped. A camera that loses its uplink usually leaves the TCP
+	// connection open; without a deadline its stream would look alive forever.
+	DefaultIdleTimeout = 10 * time.Second
+	// DefaultHandshakeTimeout bounds the RTMP handshake and the connect/publish
+	// commands, so a port scanner holds a goroutine for seconds, not forever.
+	DefaultHandshakeTimeout = 10 * time.Second
 )
+
+// Authorizer decides whether key may publish. It is the installer's: the
+// package knows nothing about cameras, tenants or where keys are stored. It
+// is asked when a publisher connects and again by Revalidate.
+type Authorizer func(ctx context.Context, key string) bool
+
+// PlayerFilter decides whether a connection from addr may read a stream. Nil
+// means only loopback: the stream is meant for the process beside the server
+// (an engine that reads it back with ffmpeg), not for the internet.
+type PlayerFilter func(addr net.Addr) bool
 
 // Config is what the application passes when it wires this package.
 //
 // A typed struct rather than a map: a misspelled key in a map is a setting that
-// silently keeps its default, and the failure shows up as behaviour nobody
-// asked for rather than as an error. Here a field that does not exist does not
-// compile.
-//
-// It names no tenant, and that is deliberate. Every route sits behind
-// RequireAuth, so the tenant of every statement is the one the Grant carries,
-// from the session of whoever is asking; a tenant written here would be a
-// second place for one to come from. The zero value is a valid configuration.
+// silently keeps its default. Authorize is the only field without one, because
+// a server that lets anybody publish is not a configuration this package
+// offers.
 type Config struct {
-	// Prefix is the path the routes are mounted under. Empty means
-	// DefaultPrefix.
-	Prefix string
-
-	// PageSize is how many records one page answers with. Zero means
-	// DefaultPageSize, and anything above MaxPageSize is refused rather than
-	// clamped: a number somebody wrote and did not get is worse than a number
-	// somebody wrote and was told about.
-	PageSize int
+	// Addr is the TCP address to listen on. Empty means DefaultAddr.
+	Addr string
+	// App is the application name publishers use. Empty means DefaultApp.
+	App string
+	// Authorize decides which stream keys may publish. Required.
+	Authorize Authorizer
+	// Players decides who may read a stream back. Nil means loopback only.
+	Players PlayerFilter
+	// IdleTimeout and HandshakeTimeout bound a silent publisher and a slow
+	// handshake. Zero means the defaults.
+	IdleTimeout, HandshakeTimeout time.Duration
+	// Logger receives one line per publisher that connects, is refused or
+	// leaves. Nil means slog.Default().
+	Logger *slog.Logger
 }
 
-// Validate reports what the configuration cannot be used with.
-//
-// It is called by New, so an application with a setting that cannot work fails
-// where it is wired rather than on the first request that needed it.
-func (c Config) Validate() error {
-	if c.Prefix != "" && c.Prefix[0] != '/' {
-		return fmt.Errorf("rtmp: Config.Prefix is %q and has to start with /", c.Prefix)
+// ErrNoAuthorizer is a Config without Authorize.
+var ErrNoAuthorizer = errors.New("rtmp: Config.Authorize is required")
+
+func (c Config) withDefaults() (Config, error) {
+	if c.Authorize == nil {
+		return c, ErrNoAuthorizer
 	}
-	if c.Prefix != "" {
-		if err := validateRoutePrefix(c.Prefix); err != nil {
-			return err
-		}
+	if c.Addr == "" {
+		c.Addr = DefaultAddr
 	}
-	if c.PageSize < 0 || c.PageSize > MaxPageSize {
-		return fmt.Errorf("rtmp: Config.PageSize is %d, and has to be between 0 and %d, where 0 means %d", c.PageSize, MaxPageSize, DefaultPageSize)
+	if c.App == "" {
+		c.App = DefaultApp
 	}
-	return nil
+	if c.Players == nil {
+		c.Players = Loopback
+	}
+	if c.IdleTimeout <= 0 {
+		c.IdleTimeout = DefaultIdleTimeout
+	}
+	if c.HandshakeTimeout <= 0 {
+		c.HandshakeTimeout = DefaultHandshakeTimeout
+	}
+	if c.Logger == nil {
+		c.Logger = slog.Default()
+	}
+	return c, nil
 }
 
-// validateRoutePrefix asks the standard library to parse the exact patterns
-// the module will register. Its parser is not exported and reports invalid
-// patterns by panic, so the throwaway mux turns that boot-time panic into the
-// configuration error New promises.
-func validateRoutePrefix(prefix string) (err error) {
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			err = fmt.Errorf("rtmp: Config.Prefix %q cannot be registered as a route path", prefix)
-		}
-	}()
-
-	handler := http.NotFoundHandler()
-	mux := http.NewServeMux()
-	mux.Handle(http.MethodGet+" "+prefix, handler)
-	mux.Handle(http.MethodGet+" "+prefix+"/{id}", handler)
-	mux.Handle(http.MethodPost+" "+prefix, handler)
-	return nil
-}
-
-// withDefaults returns the configuration with the optional fields filled in.
-//
-// It runs after Validate and never before: filling a default in first would
-// hide the value somebody actually wrote from the check that would have refused
-// it.
-func (c Config) withDefaults() Config {
-	if c.Prefix == "" {
-		c.Prefix = DefaultPrefix
-	}
-	if c.PageSize == 0 {
-		c.PageSize = DefaultPageSize
-	}
-	return c
+// Loopback is the default PlayerFilter: only connections from this host.
+func Loopback(addr net.Addr) bool {
+	tcp, ok := addr.(*net.TCPAddr)
+	return ok && tcp.IP.IsLoopback()
 }

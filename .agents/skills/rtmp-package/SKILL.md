@@ -1,12 +1,12 @@
 ---
 name: rtmp-package
-description: Install, wire and use the Arandu RTMP package (Go, Arandu) in an application. Use when the request is to "install Arandu RTMP", "add rtmp to the app", "go get github.com/hyz-is/arandu-rtmp", "wire it into bootstrap/app.go", "register the module", "use the rtmp routes", "everything under /rtmp returns 403", "403 forbidden from rtmp", "it redirects to /auth/login", "the table does not exist", "no such table", "change where it is mounted", "let admins read it", or when a project's go.mod already requires github.com/hyz-is/arandu-rtmp. Covers the three lines of wiring and where each one goes, the Config fields, none of them required, the routes, their names and the session they need, why the policy refuses everything until somebody opens it, and the migration step that is not optional.
+description: Install, wire and use the RTMP package (Go, Arandu) in an application. Use when the request is to "install RTMP", "add rtmp to the app", "go get github.com/hyz-is/arandu-rtmp", "wire it into bootstrap/app.go", "register the module", "use the rtmp routes", "everything under /rtmp returns 403", "403 forbidden from rtmp", "it redirects to /auth/login", "the table does not exist", "no such table", "change where it is mounted", "let admins read it", or when a project's go.mod already requires github.com/hyz-is/arandu-rtmp. Covers the three lines of wiring and where each one goes, the Config fields, none of them required, the routes, their names and the session they need, why the policy refuses everything until somebody opens it, and the migration step that is not optional.
 license: MIT
 metadata:
   audience: app
 ---
 
-# Using Arandu RTMP
+# Using RTMP
 
 An Arandu package with one entity, its own table, its own routes and its own
 policy. It is registered by hand — there is no service provider, no container

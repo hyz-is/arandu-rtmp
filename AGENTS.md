@@ -1,4 +1,4 @@
-# Working on Arandu RTMP
+# Working on RTMP
 
 This is an Arandu package: one entity with an embedded Hesape Model, one policy
 that decides about it, one service that owns the database handle, and the routes

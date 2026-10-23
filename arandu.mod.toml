@@ -6,16 +6,15 @@
 # four lines below worth reading before installing anything.
 
 name = "hyz-is/rtmp"
-framework = ">= 0.56"
+framework = ">= 0.58"
 profiles = ["conventional", "performance"]
 
 [permissions]
-# It answers requests and reads its own rows. Nothing leaves the process.
-network = false
-# It keeps no state outside the database.
+# It listens for RTMP publishers on its own port and answers local readers.
+network = true
+# It keeps no state outside memory: streams live as long as their connections.
 filesystem = false
 # It runs no other program.
 exec = false
-# module.go owns the rtmps table, so whoever installs this has to run
-# `aru migrate`. Declaring it is how they find that out before deploying.
-migrations = true
+# It owns no table.
+migrations = false
