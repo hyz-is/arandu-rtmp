@@ -13,7 +13,7 @@ a release is corrected by another release and never by moving a tag.
 ### Added
 
 - The RTMP receiver: `New(Config)`, `Start`, `Serve`, `Close`, `Streams` and
-  `Revalidate`. Publishers are authorized by stream key through
+  `Revalidate`, with `Config.RevalidateEvery` for a timer. Publishers are authorized by stream key through
   `Config.Authorize`; readers are loopback only unless `Config.Players` says
   otherwise; a late reader starts at a key frame.
 

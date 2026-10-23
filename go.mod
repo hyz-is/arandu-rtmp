@@ -3,7 +3,7 @@ module github.com/hyz-is/arandu-rtmp
 go 1.26.0
 
 require (
-	github.com/arandu-io/framework v0.58.0
+	github.com/arandu-io/framework v0.56.0
 	github.com/bluenviron/gortmplib v1.0.4
 	github.com/bluenviron/mediacommon/v2 v2.9.6
 )

@@ -20,6 +20,7 @@ import (
 	"net"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/arandu-io/framework/http"
 )
@@ -60,6 +61,20 @@ func (m *Module) Start(ctx context.Context) error {
 		return err
 	}
 	go func() { _ = m.Serve(ctx, ln) }()
+	if every := m.cfg.RevalidateEvery; every > 0 {
+		go func() {
+			tick := time.NewTicker(every)
+			defer tick.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-tick.C:
+					m.Revalidate(ctx)
+				}
+			}
+		}()
+	}
 	return nil
 }
 

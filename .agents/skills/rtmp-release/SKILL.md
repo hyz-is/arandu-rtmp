@@ -67,7 +67,7 @@ opened by nothing but that package's own suite.
 
 ```toml
 name = "hyz-is/rtmp"
-framework = ">= 0.58"
+framework = ">= 0.56"
 profiles = ["conventional", "performance"]
 
 [permissions]

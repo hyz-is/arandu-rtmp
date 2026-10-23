@@ -55,6 +55,10 @@ type Config struct {
 	// IdleTimeout and HandshakeTimeout bound a silent publisher and a slow
 	// handshake. Zero means the defaults.
 	IdleTimeout, HandshakeTimeout time.Duration
+	// RevalidateEvery asks Authorize again about every stream being published
+	// at this interval, so a revoked key stops even when nobody calls
+	// Revalidate. Zero leaves it to the installer.
+	RevalidateEvery time.Duration
 	// Logger receives one line per publisher that connects, is refused or
 	// leaves. Nil means slog.Default().
 	Logger *slog.Logger
