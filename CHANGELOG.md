@@ -10,6 +10,16 @@ a release is corrected by another release and never by moving a tag.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-23
+
+### Fixed
+
+- The `rtmp-package` skill, which `aru skills:sync` copies into an installing
+  application, described the template's table, policy and migration instead of
+  the receiver. It now covers `Authorize`, the wiring, the settings, loopback
+  readers, `Revalidate`, `Streams` and the port. The maintainer skills,
+  `AGENTS.md`, `CONTRIBUTING.md` and `SECURITY.md` say the same.
+
 ## [0.1.0] - 2026-10-23
 
 ### Added
