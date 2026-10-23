@@ -10,6 +10,8 @@ a release is corrected by another release and never by moving a tag.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-23
+
 ### Added
 
 - The RTMP receiver: `New(Config)`, `Start`, `Serve`, `Close`, `Streams` and
