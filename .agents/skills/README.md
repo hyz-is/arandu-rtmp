@@ -15,16 +15,15 @@ names the situation you are in rather than the topic it covers.
 
 | skill | when it fires |
 | --- | --- |
-| `rtmp-policy` | opening an action, adding an authorized Model-backed use case, or anything answering 403 |
-| `rtmp-module` | adding a route, a handler, a config field, a response field or a migration |
+| `rtmp-module` | changing the receiver: a setting, a codec, a stat, the relay, its tests |
 | `rtmp-release` | the gates, the manifest, a dependency, a version, a tag |
 | `rtmp-vault-notes` | writing the note, the gap or the journal entry, when this checkout sits inside the Arandu Obsidian vault |
 | `rtmp-package` | installing and wiring this package **into an application** |
 
 The last one has a different audience from the other three, and that is on
 purpose: it travels with the package so that an assistant working in somebody
-else's project — the one running `go get` — has the wiring, the migration step
-and the closed policy in front of it instead of guessing.
+else's project — the one running `go get` — has the wiring, the required
+`Authorize` and the loopback-only readers in front of it instead of guessing.
 
 Its frontmatter says so, under `metadata`, with `audience: app`. That line is
 what `aru skills:sync` reads to copy the skill into an application whose
@@ -38,20 +37,12 @@ package cloned somewhere else never grows a folder tree imitating one.
 
 ## Why these exist
 
-The audience of the first three is somebody changing the package. The common
-failure modes are a provider, a container lookup, a hand edit to the generated
-`RtmpQuery.go`, a rule of the entity written into the Service instead of the
-custom block of `model.go`, a handler that loads the session or maps an error to
-a status itself, a CRUD Repository beside the Model, a tenant read from the URL,
-or a Policy branch that returns nil for administrators "for now". None belongs
-here, and the last three are security failures rather than style disagreements.
-
-The package is built to be checked rather than trusted. Its denial tests use a
-nil database, so reaching even the generated query constructor before
-authorization panics. The structural twin reads every exported Service method
-and checks the same order on the allowed path, and reads every handler for the
-subject and the status it must leave to the framework. Running
-`go test -race ./...` exercises all of it.
+The audience of the first two is somebody changing the package. The common
+failure modes are growing it into a media server (recording, transcoding,
+players on the internet), giving it a table, a route or a policy that belong to
+the installer, calling `Authorize` while holding the stream lock, and widening
+who may read a stream without saying so. The suite publishes and reads real
+RTMP over loopback; `go test -race ./...` exercises it.
 
 ## Adding your own
 

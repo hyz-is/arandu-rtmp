@@ -1,6 +1,6 @@
 ---
 name: rtmp-package
-description: Install, wire and use the RTMP package (Go, Arandu) in an application. Use when the request is to "install RTMP", "add rtmp to the app", "go get github.com/hyz-is/arandu-rtmp", "wire it into bootstrap/app.go", "register the module", "use the rtmp routes", "everything under /rtmp returns 403", "403 forbidden from rtmp", "it redirects to /auth/login", "the table does not exist", "no such table", "change where it is mounted", "let admins read it", or when a project's go.mod already requires github.com/hyz-is/arandu-rtmp. Covers the three lines of wiring and where each one goes, the Config fields, none of them required, the routes, their names and the session they need, why the policy refuses everything until somebody opens it, and the migration step that is not optional.
+description: Install, wire and use the RTMP receiver (Go, Arandu) in an application. Use when the request is to "install rtmp", "go get github.com/hyz-is/arandu-rtmp", "take cameras that push RTMP", "a camera behind 4G or carrier NAT", "wire the receiver into bootstrap", "the camera connects and is dropped", "publish refused", "ffmpeg cannot read rtmp://127.0.0.1", "a revoked key keeps streaming", "address already in use on 1935", "show which cameras are pushing", or when a project's go.mod already requires github.com/hyz-is/arandu-rtmp. Covers what the receiver is and is not, the one required setting, where the wiring goes, who may read a stream, revoking keys, the stats it reports and the port it needs.
 license: MIT
 metadata:
   audience: app
@@ -8,177 +8,106 @@ metadata:
 
 # Using RTMP
 
-An Arandu package with one entity, its own table, its own routes and its own
-policy. It is registered by hand — there is no service provider, no container
-and no discovery, so if a line is not written in the application, it does not
-happen.
+A relay, not a media server. A camera behind carrier NAT or a 4G modem cannot
+be reached by a server that pulls RTSP, but it can open a connection outwards:
+it publishes to `rtmp://host/live/<key>`, the receiver asks the application
+whether that key may publish, and a process on the same host (an engine running
+ffmpeg) reads `rtmp://127.0.0.1/live/<key>` back. H.264 and H.265 video are
+forwarded as they arrive; a reader that joins late starts at the next key frame.
+
+It records nothing, transcodes nothing, owns no table and registers no route.
+Its state lives in memory for as long as each connection does.
 
 ## Install
 
 ```bash
-go get github.com/hyz-is/arandu-rtmp
+go get github.com/hyz-is/arandu-rtmp@v0.1.1
 ```
 
-## The three lines of wiring, and where each one goes
+No migration: the manifest declares `migrations = false`. It declares
+`network = true`, because it listens on a port of its own.
 
-All three are in `bootstrap/app.go`. Nothing else in the application changes,
-and `aru make:module` does not edit this file for you.
+## Wire it
 
-The import, with the other module imports:
+By hand, in `bootstrap/app.go` or the provider that builds the application's
+camera side, like every Arandu module. `Authorize` is the only required field,
+and `New` refuses a `Config` without it (`rtmp.ErrNoAuthorizer`): a receiver
+anybody could publish to is not a configuration this package offers.
 
 ```go
-import (
-	rtmp "github.com/hyz-is/arandu-rtmp"
-)
+import rtmp "github.com/hyz-is/arandu-rtmp"
+
+receiver, err := rtmp.New(rtmp.Config{
+	Addr: cfg.RTMPAddr, // ":1935" when empty
+	Authorize: func(ctx context.Context, key string) bool {
+		return cameras.HasIngestKey(ctx, key) // the application's own lookup
+	},
+	RevalidateEvery: time.Minute, // optional: drop revoked keys on a timer
+})
+if err != nil {
+	return err
+}
+app.Register(receiver)
 ```
 
-The construction, in `Build`, after the session store exists and before
-`k.Register`:
+`*rtmp.Module` is a `foundation.Module` (`Name`, an empty `Routes`) with
+`Start(ctx)` and `Close(ctx)`, so the framework starts it with the server and
+closes it on shutdown. `Start` binds the port at boot and returns the error when
+it cannot, rather than leaving a receiver that silently is not there.
 
-```go
-	rtmpModule, err := rtmp.New(rtmp.Config{}, db, sessions)
-	if err != nil {
-		return App{}, err
-	}
-```
+The key is the stream's name and its credential at once. Where keys live, which
+tenant a key belongs to and which camera it feeds is the application's: keep
+that lookup in a service behind `Authorize`, and read the tenant there from the
+application's own records, never from anything the publisher sent.
 
-And the registration, inside the `k.Register(...)` call already there:
+## Optional settings
 
-```go
-		rtmpModule,
-```
-
-`New` returns an error rather than starting half-wired. It refuses a
-configuration that cannot work, a nil database handle and a nil session store,
-so a wiring mistake costs one restart instead of arriving as a nil dereference
-on the first request that needed it.
-
-## Then run the migrations
-
-```bash
-aru migrate
-```
-
-Not optional, and not automatic. The package owns a table, which is why its
-`arandu.mod.toml` declares `migrations = true` — that declaration is how an
-installer finds out before deploying rather than from the first request.
-
-`aru migrate` is a step in the pipeline and never a call at the start of the
-process: with N replicas, N migrations race each other.
-
-**Symptom to recognise:** `no such table`, or `relation does not exist`, from a
-route that authorized correctly. The migration has not run.
-
-## Configuration
-
-| field | required | meaning |
+| field | default | what it does |
 | --- | --- | --- |
-| `Prefix` | no | where the routes are mounted. Defaults to `/rtmp` |
-| `PageSize` | no | how many records one page answers with. Defaults to 25, refused above 200 |
+| `Addr` | `:1935` | TCP address to listen on |
+| `App` | `live` | the application name in `rtmp://host/<app>/<key>` |
+| `Players` | `rtmp.Loopback` | who may read a stream back, by remote address |
+| `IdleTimeout` | 10s | a publisher that sends nothing this long is dropped |
+| `HandshakeTimeout` | 10s | bounds the handshake and the connect/publish commands |
+| `RevalidateEvery` | 0 (off) | asks `Authorize` again about every live stream at this interval |
+| `Logger` | `slog.Default()` | one line per publisher that connects, is refused or leaves; keys are redacted |
 
-`rtmp.Config{}` is a complete configuration. There is no tenant to pass:
-every route needs a session, and the tenant of every statement comes from
-`data.Tenant(g)`, off the Grant of whoever is signed in. Passing a value the
-request named — a path segment, a header, a subdomain read off the URL — is what
-`TestNoTenantIsReadOutOfTheRequest` fails on in the package. In an application
-the same mistake is `aru doctor`'s `tenant-from-request`; in a package nothing
-but the package's own suite looks.
+## Who may read
 
-`PageSize` above 200 is an error from `New`, not a silent 200. A number somebody
-wrote and did not get is worse than a number somebody wrote and was told about.
+Only loopback, by default: the stream is meant for the engine beside the
+receiver. Widening `Players` puts camera video on the network; do it only for a
+private address range the application controls, never for the internet.
 
-## Routes
+## Revoking a key
 
-| method | path | name |
-| --- | --- | --- |
-| `GET` | `/rtmp` | `rtmp.index` |
-| `GET` | `/rtmp/{id}` | `rtmp.show` |
-| `POST` | `/rtmp` | `rtmp.store` |
+When the set of keys changes (a camera removed, a key replaced), call
+`receiver.Revalidate(ctx)`; it asks `Authorize` again about every stream being
+published, drops the ones it no longer allows, and returns how many it dropped.
+`RevalidateEvery` does the same on a timer, for keys revoked somewhere the
+application does not hear about. A newer publisher of the same key replaces the
+older one.
 
-Every route sits behind `RequireAuth`, mounted by the package itself. A request
-with no session is sent to `/auth/login` — 303, or `HX-Redirect` for an htmx
-request — and comes back to the address it asked for after signing in. That is
-the sign-in screen the starter kit publishes; an application without one sees
-a 404 there.
+## What it reports
 
-**Symptom to recognise:** every route of the package redirects to
-`/auth/login`. Nobody is signed in on that request: the session cookie did not
-arrive, or the session store passed to `New` is not the one the application
-signs people in with.
+`receiver.Streams()` returns a `[]rtmp.Stats`, ordered by key: the key, the
+publisher's address, the codec (`H264` or `H265`), width and height from the
+parameter sets, frames per second over the last five seconds, when it connected
+and when its last frame arrived, bytes received and how many readers it has.
+Render it from the application's own controller, behind the application's own
+Policy; the package has no route to do it for you.
 
-Build URLs from the names, never by writing the path a second time. `aru
-route:list` shows them grouped by module. Under a custom `Prefix` the paths move
-and the names do not.
+## Deploying
 
-`GET /rtmp` answers `{"data": {"items": [...]}}`, and adds
-`"next_cursor"` beside `data` when a further page exists. Pass it back as
-`?cursor=`. A page shorter than `PageSize` is the last one and carries no
-cursor.
+The port is TCP and has to be published by the container and opened in the
+firewall. Readers connect to `127.0.0.1`, so the engine that reads the streams
+runs in the same container or the same network namespace as the receiver.
 
-`TenantID` is not in any response. That is deliberate: it names a customer's
-identifier and the response is a declared list of fields rather than the entity.
+## When something goes wrong
 
-## Every route refuses everybody, until you open the policy
-
-This is the state the package ships in, and it is not a bug to work around.
-`RtmpPolicy` denies every action and has no branch that allows one:
-
-```
-403 Forbidden
-```
-
-is what a correctly installed, correctly migrated, correctly wired package
-answers to an administrator who is signed in, on day one.
-
-Opening an action means writing the rule that opens it, in the package's
-`policy.go`, inside the block that says so:
-
-```go
-	// arandu:begin custom
-	if a == RtmpView && (s.ID == record.ID || s.HasRole("admin")) {
-		return nil
-	}
-	// arandu:end custom
-```
-
-What is not written there stays closed, including every action added later.
-There are five actions — `RtmpView`, `RtmpList`, `RtmpCreate`,
-`RtmpUpdate`, `RtmpDelete` — and opening one opens exactly one.
-
-**Do not open it from the application.** There is no hook, no override and no
-config flag for the policy, and adding one would be a second place where
-authorization is decided. If the rules this application needs are not the rules
-the package ships, the change belongs in the package.
-
-## What the answers mean
-
-| status | what happened |
+| symptom | cause |
 | --- | --- |
-| `303` to `/auth/login` | there is no session on the request |
-| `403` | the policy refused, or no rule allows the action yet |
-| `404` | no row with that id in this tenant |
-| `303` back to the page the request came from | the input was rejected; the messages and what was typed are in the flash |
-| `422` `application/problem+json` | the input was rejected and the request asked for JSON; the messages are in `errors`, keyed by field |
-
-A request that asks for JSON (an `Accept` naming `application/json`, or an XHR
-that is not htmx) gets the 403 and the 404 as problem documents too. The
-sign-in redirect is the same for every client.
-
-The package does not choose these: its handlers return what the service
-returned, and the framework's router answers it. A refusal carries no detail
-beyond the status and its standard sentence. Telling a client why a policy said
-no tells it what exists and what does not, one request at a time. The reason is
-in the log.
-
-Anything else is a 500 and the framework's error page in development. The
-package returns unexpected errors rather than swallowing them, so a route that
-answers 200 with an empty body is not something it does.
-
-## Reporting a problem
-
-Issues and pull requests go to the repository the module path names,
-`github.com/hyz-is/arandu-rtmp`, which belongs to `hyz-is`. A vulnerability goes to the
-private advisory form named in that repository's `SECURITY.md`, and never into
-an issue.
-
-MIT licensed. Copyright HYZIS.
+| the camera connects and is dropped at once | `Authorize` returned false for its key, or it published to an application name other than `App` |
+| `address already in use` at boot | another process holds `Addr`; `Start` refuses rather than running without it |
+| ffmpeg on another host cannot read | `Players` is loopback only, on purpose |
+| a stream stops after ten seconds of a frozen camera | `IdleTimeout`: a camera that lost its uplink usually leaves the TCP connection open |
+| width and height are zero | the codec did not carry its parameter sets in a form the receiver reads; the video is still relayed |

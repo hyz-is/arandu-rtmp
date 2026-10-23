@@ -25,21 +25,20 @@ unless you ask not to be.
 
 ## What is in scope
 
-Anything that lets a caller reach data a policy did not authorize. In
-particular:
+Anything that lets somebody publish or read a stream the installer did not
+allow. In particular:
 
-- a path from a handler to a Model or database handle that does not pass through
-  the Service and its Policy;
-- a route reachable without `RequireAuth`, or a handler that takes who is
-  asking from anywhere but the subject the guard put on the request;
-- a Model terminal reached before `security.Authorize`;
-- a query whose tenant scope is disabled, or a tenant taken from anywhere but
-  `data.Tenant(g)`;
-- a `Grant` that can be produced without a policy returning nil;
-- a field reaching a response that `Resource` does not list.
+- a publish accepted without `Config.Authorize` returning true for its key;
+- a stream readable from an address `Config.Players` refuses, or from outside
+  the host when `Players` is left at its default;
+- a revoked key that keeps streaming after `Revalidate`;
+- a stream key written to a log or an error in clear;
+- a publisher or a reader that can exhaust the receiver's memory or goroutines
+  past the timeouts it is configured with.
 
 ## What is not
 
 - A vulnerability in the framework itself. Report that to the framework.
-- A policy that is too permissive in an application that opened it. What this
-  package ships denies everything; what an application opens is its own.
+- An `Authorize` or `Players` that is too permissive in an application that
+  wrote it. What this package ships refuses a receiver without `Authorize` and
+  reads back to loopback only; what an application opens is its own.
